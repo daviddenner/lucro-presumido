@@ -1,0 +1,1034 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Calculadora do Lucro Presumido</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans+Condensed:wght@500;600;700&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
+<style>
+/* Layout: lançamentos à esquerda; à direita, a memória de cálculo como folha pautada de livro contábil
+   (deduções em tinta vermelha, totais com sublinhado duplo). Uma coluna no celular. */
+:root {
+  --bg: #EDF1EC;
+  --surface: #FAFCF9;
+  --field: #FFFFFF;
+  --ink: #16211B;
+  --muted: #55655C;
+  --rule: #CBD8CE;
+  --rule-strong: #93A89A;
+  --accent: #1C5785;
+  --accent-ink: #FFFFFF;
+  --deduct: #A3332A;
+  --warn-bg: #FBF0CF; --warn-fg: #5A4300; --warn-rule: #DDBF62;
+  --info-bg: #E2EDF5; --info-fg: #163D5C; --info-rule: #9EC0DA;
+  --err-bg: #F8E1DE;  --err-fg: #7A2219;  --err-rule: #E0A097;
+  --font-display: "IBM Plex Sans Condensed", "Arial Narrow", "Roboto Condensed", system-ui, sans-serif;
+  --font-body: "IBM Plex Sans", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  --font-num: "IBM Plex Mono", ui-monospace, "Cascadia Mono", Consolas, "Courier New", monospace;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #0F1512; --surface: #151D19; --field: #0F1512; --ink: #E2EBE5; --muted: #9DAEA4;
+    --rule: #2A3731; --rule-strong: #4B5F54; --accent: #7DB5DF; --accent-ink: #0B1A26; --deduct: #F08A7C;
+    --warn-bg: #362C0E; --warn-fg: #F1D88C; --warn-rule: #7A6421;
+    --info-bg: #142838; --info-fg: #BAD8EF; --info-rule: #2F5675;
+    --err-bg: #3B1B17;  --err-fg: #F5B4AB;  --err-rule: #7D3A31;
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #0F1512; --surface: #151D19; --field: #0F1512; --ink: #E2EBE5; --muted: #9DAEA4;
+  --rule: #2A3731; --rule-strong: #4B5F54; --accent: #7DB5DF; --accent-ink: #0B1A26; --deduct: #F08A7C;
+  --warn-bg: #362C0E; --warn-fg: #F1D88C; --warn-rule: #7A6421;
+  --info-bg: #142838; --info-fg: #BAD8EF; --info-rule: #2F5675;
+  --err-bg: #3B1B17;  --err-fg: #F5B4AB;  --err-rule: #7D3A31;
+  color-scheme: dark;
+}
+
+*, *::before, *::after { box-sizing: border-box; }
+[hidden] { display: none !important; }
+html { -webkit-text-size-adjust: 100%; }
+body { margin: 0; background: var(--bg); color: var(--ink); font-family: var(--font-body); font-size: 15px; line-height: 1.5; }
+table { font-size: inherit; }
+a { color: var(--accent); }
+input, select, button, textarea { font: inherit; }
+button { cursor: pointer; }
+:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+.pagina {
+  max-width: 1240px; margin: 0 auto; display: grid; gap: 22px;
+  padding-block: 28px 48px;
+  padding-left: max(16px, env(safe-area-inset-left, 0px));
+  padding-right: max(16px, env(safe-area-inset-right, 0px));
+}
+
+/* Cabeçalho */
+.topo { display: grid; gap: 8px; }
+.eyebrow { margin: 0; font-family: var(--font-display); font-weight: 600; font-size: 0.78rem; letter-spacing: 0.09em; text-transform: uppercase; color: var(--muted); }
+.topo h1 { margin: 0; font-family: var(--font-display); font-weight: 700; font-size: clamp(1.9rem, 1.3rem + 2.2vw, 2.7rem); line-height: 1.05; letter-spacing: -0.01em; text-wrap: balance; }
+.lead { margin: 2px 0 0; max-width: 72ch; }
+.formula { margin: 6px 0 0; display: flex; flex-wrap: wrap; align-items: center; gap: 6px 8px; font-family: var(--font-num); font-size: 0.84rem; }
+.formula span { padding: 3px 8px; border: 1px solid var(--rule-strong); border-radius: 4px; background: var(--surface); }
+.formula b { color: var(--accent); font-weight: 600; }
+
+/* Exemplos */
+.exemplos { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.exemplos > .rotulo-ex { font-size: 0.85rem; color: var(--muted); }
+.chip { border: 1px solid var(--rule-strong); background: var(--surface); color: var(--ink); border-radius: 999px; padding: 5px 12px; font-size: 0.86rem; }
+.chip:hover { border-color: var(--accent); color: var(--accent); }
+.chip[aria-pressed="true"] { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); }
+.estado-ex { flex-basis: 100%; margin: 0; font-size: 0.84rem; color: var(--muted); }
+
+/* Grade principal */
+.grade { display: grid; gap: 22px; grid-template-columns: minmax(0, 1fr); align-items: start; }
+@media (min-width: 980px) {
+  .grade { grid-template-columns: minmax(0, 1fr) minmax(0, 1.08fr); }
+  .memoria { position: sticky; top: calc(env(safe-area-inset-top, 0px) + 12px); max-height: calc(100dvh - 24px); overflow: auto; }
+}
+.painel { background: var(--surface); border: 1px solid var(--rule); border-radius: 12px; min-width: 0; }
+
+/* Lançamentos */
+.lancamentos { padding: 2px 18px 14px; }
+.secao { display: grid; gap: 12px; padding-block: 16px; border-bottom: 1px solid var(--rule); min-width: 0; }
+.secao:last-child { border-bottom: 0; }
+.secao h2 { margin: 0; font-family: var(--font-display); font-size: 1.08rem; font-weight: 600; }
+.ajuda { margin: -6px 0 0; font-size: 0.84rem; color: var(--muted); max-width: 66ch; }
+.campos { display: grid; gap: 12px; grid-template-columns: repeat(auto-fit, minmax(min(100%, 10.5rem), 1fr)); }
+.campo { display: grid; gap: 4px; min-width: 0; align-content: end; }
+.campo > span { font-size: 0.82rem; color: var(--muted); line-height: 1.3; }
+input, select { width: 100%; min-width: 0; color: var(--ink); background: var(--field); border: 1px solid var(--rule-strong); border-radius: 6px; padding: 8px 10px; }
+input.dinheiro, input.pctin { font-family: var(--font-num); text-align: right; font-variant-numeric: tabular-nums; }
+.nota-periodo { margin: 0; font-size: 0.84rem; color: var(--info-fg); background: var(--info-bg); border: 1px solid var(--info-rule); border-radius: 8px; padding: 8px 12px; }
+
+.atividades { display: grid; }
+.atv { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) 2.4rem; gap: 8px 10px; align-items: end; padding-block: 12px; border-bottom: 1px dashed var(--rule); }
+.atv .atv-tipo { grid-column: 1 / 3; grid-row: 1; }
+.atv .btn-remover { grid-column: 3; grid-row: 1; }
+.atv .campo-receita { grid-column: 1; grid-row: 2; }
+.atv .campo-deducoes { grid-column: 2 / 4; grid-row: 2; }
+.atv:first-child { padding-top: 2px; }
+.atv-desc { grid-column: 1 / -1; margin: 0; font-size: 0.8rem; color: var(--muted); }
+.atv-pcts { grid-column: 1 / -1; display: grid; grid-template-columns: repeat(2, minmax(0, 11rem)); gap: 10px; }
+.btn-remover { width: 2.4rem; height: 2.4rem; border: 1px solid var(--rule-strong); background: transparent; color: var(--muted); border-radius: 6px; font-size: 1.25rem; line-height: 1; }
+.btn-remover:hover { color: var(--deduct); border-color: var(--deduct); }
+@media (max-width: 680px) {
+  .atv { grid-template-columns: minmax(0, 1.3fr) minmax(0, 0.7fr) 2.4rem; }
+  input.dinheiro { padding-inline: 8px; font-size: 0.92rem; }
+}
+.btn-sec { justify-self: start; border: 1px dashed var(--accent); color: var(--accent); background: transparent; border-radius: 6px; padding: 7px 12px; font-size: 0.9rem; }
+.btn-sec:hover { border-style: solid; }
+
+details.lc { border: 1px solid var(--rule); border-radius: 8px; padding: 10px 12px; background: var(--field); }
+details.lc summary { font-family: var(--font-display); font-weight: 600; cursor: pointer; }
+details.lc[open] summary { margin-bottom: 10px; }
+details.lc .corpo { display: grid; gap: 12px; }
+details.lc p { margin: 0; font-size: 0.86rem; max-width: 66ch; }
+
+/* Memória de cálculo */
+.memoria { padding: 18px; display: grid; gap: 18px; }
+.memoria > h2 { margin: 0; font-family: var(--font-display); font-size: 1.08rem; font-weight: 600; }
+.resumo { display: grid; gap: 12px; padding-bottom: 16px; border-bottom: 2px solid var(--ink); }
+.resumo-topo { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: flex-end; gap: 6px 16px; }
+.rotulo { display: block; font-family: var(--font-display); text-transform: uppercase; letter-spacing: 0.08em; font-size: 0.74rem; font-weight: 600; color: var(--muted); }
+.total-grande { font-family: var(--font-num); font-weight: 600; font-size: clamp(1.7rem, 1.2rem + 1.8vw, 2.3rem); font-variant-numeric: tabular-nums; line-height: 1.1; overflow-wrap: anywhere; }
+.carga { font-family: var(--font-num); font-size: 1rem; text-align: right; }
+.tributos { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; }
+@media (max-width: 520px) { .tributos { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+.trib { border: 1px solid var(--rule); border-radius: 8px; padding: 8px 10px; display: grid; gap: 2px; background: var(--field); min-width: 0; }
+.trib .v { font-family: var(--font-num); font-variant-numeric: tabular-nums; font-weight: 600; font-size: 0.95rem; overflow-wrap: anywhere; }
+.a-pagar { margin: 0; font-size: 0.9rem; }
+
+.avisos { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }
+.aviso { border: 1px solid var(--warn-rule); background: var(--warn-bg); color: var(--warn-fg); border-radius: 8px; padding: 8px 12px; font-size: 0.86rem; }
+.aviso.info { border-color: var(--info-rule); background: var(--info-bg); color: var(--info-fg); }
+.aviso.erro { border-color: var(--err-rule); background: var(--err-bg); color: var(--err-fg); }
+.aviso b { font-weight: 600; }
+
+.razao { display: grid; gap: 20px; }
+.passo h3 { margin: 0 0 2px; display: flex; gap: 10px; align-items: baseline; font-family: var(--font-display); font-weight: 600; font-size: 0.84rem; letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted); }
+.passo h3 .n { font-family: var(--font-num); color: var(--accent); letter-spacing: 0; }
+.passo-nota { margin: 0 0 4px; font-size: 0.82rem; color: var(--muted); max-width: 66ch; }
+.lr { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 2px 14px; padding: 7px 0; border-bottom: 1px solid var(--rule); align-items: baseline; }
+.lr .rot { min-width: 0; }
+.lr .f { display: block; font-family: var(--font-num); font-size: 0.78rem; color: var(--muted); overflow-wrap: anywhere; }
+.lr .val { font-family: var(--font-num); font-variant-numeric: tabular-nums; text-align: right; white-space: nowrap; }
+.lr.deducao .val { color: var(--deduct); }
+.lr.subtotal { font-weight: 600; }
+.lr.total { font-weight: 600; border-bottom: 3px double var(--ink); }
+.lr.nota .rot, .lr.nota .val { color: var(--accent); }
+
+.pagamento h3 { margin: 0 0 6px; font-family: var(--font-display); font-weight: 600; font-size: 0.84rem; letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted); }
+.rolagem { overflow-x: auto; }
+.tab { width: 100%; border-collapse: collapse; font-size: 0.86rem; }
+.tab th, .tab td { text-align: left; padding: 7px 10px 7px 0; border-bottom: 1px solid var(--rule); vertical-align: top; }
+.tab th { font-family: var(--font-display); font-weight: 600; font-size: 0.74rem; letter-spacing: 0.06em; text-transform: uppercase; color: var(--muted); }
+.mono { font-family: var(--font-num); font-variant-numeric: tabular-nums; }
+.num { font-family: var(--font-num); font-variant-numeric: tabular-nums; text-align: right; white-space: nowrap; }
+
+.acoes { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; }
+.btn { border: 1px solid var(--accent); background: var(--accent); color: var(--accent-ink); border-radius: 6px; padding: 8px 14px; font-weight: 500; }
+.btn:hover { filter: brightness(1.08); }
+.status-copia { font-size: 0.85rem; color: var(--muted); }
+textarea.copia { width: 100%; min-height: 12rem; font-family: var(--font-num); font-size: 0.8rem; color: var(--ink); background: var(--field); border: 1px solid var(--rule-strong); border-radius: 6px; padding: 8px; }
+
+/* Referência */
+.referencia { display: grid; gap: 22px; grid-template-columns: minmax(0, 1fr); align-items: start; }
+@media (min-width: 980px) { .referencia { grid-template-columns: minmax(0, 1.35fr) minmax(0, 1fr); } }
+.referencia .painel { padding: 18px; display: grid; gap: 12px; }
+.referencia h2 { margin: 0; font-family: var(--font-display); font-size: 1.08rem; font-weight: 600; }
+.referencia h3 { margin: 6px 0 0; font-family: var(--font-display); font-size: 0.95rem; font-weight: 600; }
+.referencia p { margin: 0; font-size: 0.9rem; max-width: 70ch; }
+.lista { margin: 0; padding-left: 1.1rem; display: grid; gap: 6px; font-size: 0.88rem; }
+.rodape { margin: 0; font-size: 0.82rem; color: var(--muted); max-width: 90ch; }
+</style>
+<meta name="description" content="Calcula o IRPJ, a CSLL, o PIS e a COFINS do lucro presumido por trimestre, com memória de cálculo passo a passo.">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='6' fill='%231C5785'/%3E%3Ctext x='16' y='23' font-family='Arial' font-size='20' font-weight='700' text-anchor='middle' fill='white'%3E%25%3C/text%3E%3C/svg%3E">
+</head>
+<body>
+<div class="pagina">
+  <header class="topo">
+    <p class="eyebrow">Apuração trimestral · IRPJ, CSLL, PIS e COFINS</p>
+    <h1>Calculadora do Lucro Presumido</h1>
+    <p class="lead">No lucro presumido, o IRPJ e a CSLL não incidem sobre o lucro da contabilidade. A lei presume que um percentual fixo da receita bruta é lucro (32% para serviços em geral, 8% para comércio e indústria), e os tributos incidem sobre essa base mesmo que a empresa tenha tido prejuízo.</p>
+    <p class="formula" aria-label="Como o cálculo funciona">
+      <span>receita bruta</span><b>×</b><span>% de presunção</span><b>=</b><span>base presumida</span><b>→</b><span>IRPJ 15% + adicional 10%</span><span>CSLL 9%</span>
+    </p>
+  </header>
+
+  <div class="exemplos" role="group" aria-label="Exemplos prontos">
+    <span class="rotulo-ex">Exemplos:</span>
+    <button type="button" class="chip" data-exemplo="aula" aria-pressed="false">Serviços, R$ 100 mil</button>
+    <button type="button" class="chip" data-exemplo="retencoes" aria-pressed="false">Serviços com retenções, R$ 300 mil</button>
+    <button type="button" class="chip" data-exemplo="pr11" aria-pressed="false">Comércio, R$ 1,5 milhão (Receita, pergunta 11)</button>
+    <button type="button" class="chip" data-exemplo="pr14" aria-pressed="false">Comércio e serviços (Receita, pergunta 14)</button>
+    <button type="button" class="chip" data-exemplo="limpar" aria-pressed="false">Limpar tudo</button>
+    <p class="estado-ex" id="estado-ex" aria-live="polite"></p>
+  </div>
+
+  <main class="grade">
+    <form class="painel lancamentos" id="form" autocomplete="off" novalidate>
+      <section class="secao" aria-labelledby="t-periodo">
+        <h2 id="t-periodo">Período de apuração</h2>
+        <div class="campos">
+          <label class="campo"><span>Ano-calendário</span>
+            <select id="ano">
+              <option value="2025">2025 ou anterior</option>
+              <option value="2026">2026</option>
+              <option value="2027">2027</option>
+            </select>
+          </label>
+          <label class="campo"><span>Trimestre</span>
+            <select id="trimestre">
+              <option value="1">1º (jan. a mar.)</option>
+              <option value="2">2º (abr. a jun.)</option>
+              <option value="3">3º (jul. a set.)</option>
+              <option value="4">4º (out. a dez.)</option>
+            </select>
+          </label>
+          <label class="campo"><span>Meses de atividade no trimestre</span>
+            <select id="meses">
+              <option value="3">3 (completo)</option>
+              <option value="2">2</option>
+              <option value="1">1</option>
+            </select>
+          </label>
+        </div>
+        <p class="nota-periodo" id="nota-periodo"></p>
+      </section>
+
+      <section class="secao" aria-labelledby="t-receita">
+        <h2 id="t-receita">Receita bruta por atividade</h2>
+        <p class="ajuda">Some o faturamento dos três meses de cada atividade. Não inclua IPI nem ICMS-ST destacados. Em "Devoluções e descontos", informe devoluções, vendas canceladas e descontos incondicionais.</p>
+        <div class="atividades" id="atividades"></div>
+        <button type="button" class="btn-sec" id="add-atv">+ Adicionar atividade</button>
+      </section>
+
+      <section class="secao" aria-labelledby="t-outras">
+        <h2 id="t-outras">Outras receitas</h2>
+        <p class="ajuda">Entram inteiras na base do IRPJ e da CSLL, sem percentual de presunção, e não contam para o limite do acréscimo de 2026.</p>
+        <div class="campos">
+          <label class="campo"><span>Ganhos de capital (R$)</span><input id="ganhos" class="dinheiro" inputmode="decimal" placeholder="0,00"></label>
+          <label class="campo"><span>Receitas financeiras (R$)</span><input id="financeiras" class="dinheiro" inputmode="decimal" placeholder="0,00"></label>
+          <label class="campo"><span>Demais receitas (R$)</span><input id="demais" class="dinheiro" inputmode="decimal" placeholder="0,00"></label>
+        </div>
+      </section>
+
+      <section class="secao" aria-labelledby="t-ret">
+        <h2 id="t-ret">Retenções na fonte</h2>
+        <p class="ajuda">Valores que os clientes ou o banco já retiveram sobre receitas deste trimestre. São descontados do imposto devido.</p>
+        <div class="campos">
+          <label class="campo"><span>IRRF retido (R$)</span><input id="ret-irrf" class="dinheiro" inputmode="decimal" placeholder="0,00"></label>
+          <label class="campo"><span>CSLL retida (R$)</span><input id="ret-csll" class="dinheiro" inputmode="decimal" placeholder="0,00"></label>
+        </div>
+      </section>
+
+      <section class="secao" id="bloco-pc" aria-labelledby="t-pc">
+        <h2 id="t-pc">PIS e COFINS</h2>
+        <p class="ajuda">No lucro presumido o PIS e a COFINS são cumulativos: 0,65% e 3% sobre a receita bruta, sem créditos.</p>
+        <div class="campos">
+          <label class="campo"><span>Exclusões da base: ICMS destacado, exportações (R$)</span><input id="exclusoes" class="dinheiro" inputmode="decimal" placeholder="0,00"></label>
+          <label class="campo"><span>PIS retido (R$)</span><input id="ret-pis" class="dinheiro" inputmode="decimal" placeholder="0,00"></label>
+          <label class="campo"><span>COFINS retida (R$)</span><input id="ret-cofins" class="dinheiro" inputmode="decimal" placeholder="0,00"></label>
+        </div>
+      </section>
+
+      <section class="secao">
+        <details class="lc" id="lc">
+          <summary>Acréscimo de 2026 e 2027 na presunção</summary>
+          <div class="corpo">
+            <p>A Lei Complementar 224/2025 aumentou em 10% os percentuais de presunção sobre a receita que passar de R$ 5 milhões no ano, o que dá R$ 1.250.000,00 por trimestre. Assim, 32% vira 35,2% e 8% vira 8,8% na parcela excedente. No IRPJ vale desde o 1º trimestre de 2026; na CSLL, desde o 2º. A Lei Complementar 239/2026 passa o acréscimo para 20% a partir de 2027.</p>
+            <p>Os campos abaixo são preenchidos conforme o período. Altere só se precisar refazer um ajuste entre trimestres.</p>
+            <div class="campos">
+              <label class="campo"><span>Acréscimo no IRPJ (%)</span><input id="acr-irpj" class="pctin" inputmode="decimal"></label>
+              <label class="campo"><span>Acréscimo na CSLL (%)</span><input id="acr-csll" class="pctin" inputmode="decimal"></label>
+              <label class="campo"><span>Limite do trimestre (R$)</span><input id="limite" class="dinheiro" inputmode="decimal"></label>
+            </div>
+            <button type="button" class="btn-sec" id="restaurar">Voltar aos valores da lei</button>
+          </div>
+        </details>
+      </section>
+    </form>
+
+    <section class="painel memoria" id="memoria" aria-labelledby="t-memoria">
+      <h2 id="t-memoria">Memória de cálculo</h2>
+      <div class="resumo">
+        <div class="resumo-topo">
+          <div>
+            <span class="rotulo" id="rotulo-total">Tributos devidos no trimestre</span>
+            <div class="total-grande" id="total-devido" aria-live="polite">R$ 0,00</div>
+          </div>
+          <div>
+            <span class="rotulo">Carga sobre a receita</span>
+            <div class="carga" id="carga">0,00%</div>
+          </div>
+        </div>
+        <div class="tributos" id="tributos"></div>
+        <p class="a-pagar" id="a-pagar" hidden></p>
+      </div>
+      <ul class="avisos" id="avisos" hidden></ul>
+      <div class="razao" id="razao"></div>
+      <div class="pagamento">
+        <h3>Como pagar</h3>
+        <div class="rolagem">
+          <table class="tab" id="tab-pagamento">
+            <thead><tr><th scope="col">Tributo</th><th scope="col">DARF</th><th scope="col">Vencimento</th><th scope="col">Forma</th></tr></thead>
+            <tbody></tbody>
+          </table>
+        </div>
+      </div>
+      <div class="acoes">
+        <button type="button" class="btn" id="copiar">Copiar memória de cálculo</button>
+        <span class="status-copia" id="status-copia" aria-live="polite"></span>
+      </div>
+      <textarea class="copia" id="copia-texto" readonly hidden aria-label="Memória de cálculo em texto"></textarea>
+    </section>
+  </main>
+
+  <section class="referencia" aria-label="Referência">
+    <div class="painel">
+      <h2>Percentuais de presunção</h2>
+      <div class="rolagem">
+        <table class="tab">
+          <thead><tr><th scope="col">Atividade</th><th scope="col" class="num">IRPJ</th><th scope="col" class="num">CSLL</th><th scope="col">Base legal</th></tr></thead>
+          <tbody id="tab-pct"></tbody>
+        </table>
+      </div>
+      <p>Na parcela da receita acima do limite: em 2026 cada percentual sobe 10% (32% vira 35,2%; 8% vira 8,8%; 12% vira 13,2%); a partir de 2027 sobe 20% (32% vira 38,4%; 8% vira 9,6%; 12% vira 14,4%).</p>
+    </div>
+    <div class="painel">
+      <h2>Alíquotas e regras</h2>
+      <ul class="lista">
+        <li><b>IRPJ:</b> 15% sobre a base, mais adicional de 10% sobre o que passar de R$ 60.000,00 no trimestre (R$ 20.000,00 por mês de atividade).</li>
+        <li><b>CSLL:</b> 9% sobre a base.</li>
+        <li><b>PIS e COFINS:</b> 0,65% e 3% sobre a receita bruta de cada mês, até 2026.</li>
+        <li><b>Quem pode optar:</b> empresa com receita total de até R$ 78 milhões no ano anterior, sem atividade que obrigue ao lucro real (bancos e factoring, por exemplo). A opção vale para o ano inteiro e é feita com o pagamento do primeiro DARF do ano.</li>
+        <li><b>Pagamento do IRPJ e da CSLL:</b> quota única até o último dia útil do mês seguinte ao trimestre, ou até 3 quotas mensais de pelo menos R$ 1.000,00. Imposto abaixo de R$ 2.000,00 vai em quota única.</li>
+      </ul>
+      <h3>Fora desta calculadora</h3>
+      <ul class="lista">
+        <li>ISS, ICMS, contribuição previdenciária e a CBS e o IBS da reforma tributária.</li>
+        <li>Ajuste do acréscimo entre trimestres do mesmo ano. A calculadora aplica o limite de R$ 1.250.000,00 a cada trimestre, como nos exemplos da Receita. Em ano com trimestres acima e abaixo do limite, confira o ajuste e, se preciso, altere o limite no bloco do acréscimo.</li>
+        <li>CSLL no 1º trimestre de 2027: o acréscimo de 20% começa em 1º de março de 2027, segundo as notícias sobre a LC 239/2026. A calculadora usa 10% nesse trimestre; confira quando a Receita publicar a orientação.</li>
+      </ul>
+      <h3>Fontes</h3>
+      <ul class="lista">
+        <li><a href="https://www.planalto.gov.br/ccivil_03/leis/l9249.htm" target="_blank" rel="noopener">Lei 9.249/1995</a>, arts. 3º, 15 e 20: percentuais e alíquotas.</li>
+        <li><a href="https://www.planalto.gov.br/ccivil_03/leis/l9430.htm" target="_blank" rel="noopener">Lei 9.430/1996</a>, arts. 1º, 5º e 25: trimestre, quotas e base de cálculo.</li>
+        <li><a href="https://www.planalto.gov.br/ccivil_03/leis/l9718compilada.htm" target="_blank" rel="noopener">Lei 9.718/1998</a>: PIS e COFINS cumulativos e limite de R$ 78 milhões.</li>
+        <li><a href="https://www.gov.br/receitafederal/pt-br/assuntos/orientacao-tributaria/declaracoes-e-demonstrativos/ecf/perguntas-e-respostas-pessoa-juridica-2020-arquivos/capitulo-xiii-irpj-lucro-presumido-2020.pdf" target="_blank" rel="noopener">Receita Federal, Perguntas e Respostas PJ, capítulo XIII</a>: lucro presumido.</li>
+        <li><a href="https://www.gov.br/receitafederal/pt-br/centrais-de-conteudo/publicacoes/perguntas-e-respostas/beneficios-fiscais/perguntas-e-respostas-reducao-dos-incentivos-e-beneficios-tributarios-v5-final.pdf" target="_blank" rel="noopener">Receita Federal, Perguntas e Respostas sobre a LC 224/2025 (v5, julho de 2026)</a>, perguntas 11 a 14.</li>
+        <li><a href="https://www.planalto.gov.br/ccivil_03/leis/lcp/lcp224.htm" target="_blank" rel="noopener">Lei Complementar 224/2025</a>, art. 4º, e IN RFB 2.305/2025, art. 15. Lei Complementar 239/2026 (DOU de 24/11/2026).</li>
+      </ul>
+    </div>
+  </section>
+
+  <p class="rodape">Ferramenta didática. Regras conferidas em 25/11/2026. Antes de recolher, confira os valores com a escrituração da empresa e com o contador responsável.</p>
+</div>
+
+<script id="motor">
+/* Motor de cálculo do lucro presumido. Sem dependência da página: pode ser testado no Node.
+   Valores de entrada em reais; valores de saída em centavos (inteiros). */
+globalThis.MotorLP = (function () {
+  'use strict';
+
+  /* Percentuais de presunção. IRPJ: Lei 9.249/1995, art. 15. CSLL: Lei 9.249/1995, art. 20.
+     Detalhamento: IN RFB 1.700/2017, arts. 33 e 34. */
+  const ATIVIDADES = [
+    { id: 'comercio', curto: 'Comércio, indústria e atividade rural', irpj: 8, csll: 12,
+      desc: 'Venda de mercadorias e de produtos, inclusive de fabricação própria e da atividade rural.',
+      base: 'Lei 9.249/1995, art. 15, caput; art. 20, II' },
+    { id: 'combustiveis', curto: 'Revenda de combustíveis', irpj: 1.6, csll: 12,
+      desc: 'Revenda, para consumo, de combustível derivado de petróleo, álcool etílico carburante e gás natural.',
+      base: 'Lei 9.249/1995, art. 15, § 1º, I; art. 20, II' },
+    { id: 'transporte_carga', curto: 'Transporte de cargas', irpj: 8, csll: 12,
+      desc: 'Serviço de transporte de cargas.',
+      base: 'Lei 9.249/1995, art. 15, caput e § 1º, II, "a"; art. 20, II' },
+    { id: 'transporte_outros', curto: 'Transporte, exceto de cargas', irpj: 16, csll: 12,
+      desc: 'Transporte de passageiros e demais serviços de transporte que não sejam de carga.',
+      base: 'Lei 9.249/1995, art. 15, § 1º, II, "a"; art. 20, II' },
+    { id: 'hospitalares', curto: 'Serviços hospitalares e de diagnóstico', irpj: 8, csll: 12,
+      desc: 'Serviços hospitalares e de auxílio diagnóstico e terapia, patologia clínica, imagenologia, anatomia patológica e citopatologia, medicina nuclear e análises clínicas, prestados por sociedade empresária que cumpra as normas da Anvisa.',
+      base: 'Lei 9.249/1995, art. 15, caput e § 1º, III, "a"; art. 20, II' },
+    { id: 'empreitada_materiais', curto: 'Empreitada com todos os materiais', irpj: 8, csll: 12,
+      desc: 'Construção por empreitada em que a empresa fornece todos os materiais indispensáveis à obra, incorporados a ela.',
+      base: 'IN RFB 1.700/2017, art. 33, § 1º' },
+    { id: 'imobiliaria', curto: 'Atividade imobiliária', irpj: 8, csll: 12,
+      desc: 'Loteamento, desmembramento, incorporação imobiliária, construção de prédios para venda e venda de imóveis construídos ou adquiridos para revenda.',
+      base: 'IN RFB 1.700/2017, art. 33, § 1º' },
+    { id: 'servicos', curto: 'Serviços em geral', irpj: 32, csll: 32,
+      desc: 'Prestação de serviços em geral, inclusive de profissões regulamentadas (advocacia, engenharia, contabilidade, consultoria etc.).',
+      base: 'Lei 9.249/1995, art. 15, § 1º, III, "a"; art. 20, I' },
+    { id: 'servicos_ate_120mil', curto: 'Serviços, receita anual até R$ 120 mil', irpj: 16, csll: 32,
+      desc: 'Empresa exclusivamente prestadora de serviços com receita bruta anual de até R$ 120 mil. Não vale para serviços hospitalares, de transporte nem para sociedades de profissão regulamentada. O 16% vale só para o IRPJ; a CSLL fica em 32%.',
+      base: 'Lei 9.250/1995, art. 40' },
+    { id: 'construcao_mao_de_obra', curto: 'Construção só com mão de obra', irpj: 32, csll: 32,
+      desc: 'Construção por administração, ou por empreitada só de mão de obra ou com fornecimento parcial de materiais.',
+      base: 'IN RFB 1.700/2017, art. 33, § 1º' },
+    { id: 'intermediacao', curto: 'Intermediação de negócios', irpj: 32, csll: 32,
+      desc: 'Corretagem, representação comercial e demais intermediações de negócios.',
+      base: 'Lei 9.249/1995, art. 15, § 1º, III, "b"; art. 20, I' },
+    { id: 'locacao', curto: 'Locação, administração e cessão de bens', irpj: 32, csll: 32,
+      desc: 'Administração, locação ou cessão de bens imóveis, móveis e direitos de qualquer natureza.',
+      base: 'Lei 9.249/1995, art. 15, § 1º, III, "c"; art. 20, I' },
+    { id: 'concessao', curto: 'Obras em concessão de serviço público', irpj: 32, csll: 32,
+      desc: 'Construção, recuperação, reforma, ampliação ou melhoramento de infraestrutura vinculados a contrato de concessão de serviço público.',
+      base: 'Lei 9.249/1995, art. 15, § 1º, III, "e"; art. 20, I' },
+    { id: 'esc', curto: 'Empresa Simples de Crédito', irpj: 38.4, csll: 38.4,
+      desc: 'Empréstimos, financiamentos e desconto de títulos de crédito feitos por Empresa Simples de Crédito.',
+      base: 'Lei 9.249/1995, art. 15, § 1º, IV; art. 20, III' },
+    { id: 'outra', curto: 'Outra atividade (informar percentuais)', irpj: null, csll: null,
+      desc: 'Use quando a atividade não está na lista. Informe os percentuais de presunção do IRPJ e da CSLL.',
+      base: '' }
+  ];
+
+  const LIMITE_TRIMESTRAL = 125000000;     // R$ 1.250.000,00 = R$ 5 milhões por ano / 4 (LC 224/2025; P&R Receita v5, perg. 11)
+  const LIMITE_ADICIONAL_MES = 2000000;    // R$ 20.000,00 por mês (Lei 9.249/1995, art. 3º, § 1º; Lei 9.430/1996, art. 4º)
+  const LIMITE_OPCAO_TRIMESTRE = 1950000000; // R$ 78 milhões por ano / 4 (Lei 9.718/1998, art. 13)
+  const MESES = ['janeiro', 'fevereiro', 'março', 'abril', 'maio', 'junho', 'julho', 'agosto', 'setembro', 'outubro', 'novembro', 'dezembro'];
+
+  const nf2 = new Intl.NumberFormat('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  const nfp = new Intl.NumberFormat('pt-BR', { maximumFractionDigits: 4 });
+  const fmtR = c => 'R$ ' + nf2.format(c / 100);
+  const pct = p => nfp.format(p) + '%';
+  const soma = lista => lista.reduce((a, b) => a + b, 0);
+
+  function atividade(id) { return ATIVIDADES.find(a => a.id === id) || null; }
+
+  // Reais (número ou texto numérico) -> centavos. Vazio vira 0; valor inválido vira NaN.
+  function centavos(v) {
+    if (v === null || v === undefined || v === '') return 0;
+    const n = typeof v === 'number' ? v : Number(v);
+    return isFinite(n) ? Math.round(n * 100) : NaN;
+  }
+
+  // Parâmetros da lei para o período. Acréscimos em % sobre o percentual de presunção.
+  function parametrosPadrao(ano, trimestre) {
+    ano = Number(ano); trimestre = Number(trimestre);
+    const p = { acrescimoIrpj: 0, acrescimoCsll: 0, limite: LIMITE_TRIMESTRAL, pisCofins: ano <= 2026 };
+    if (ano === 2026) {
+      p.acrescimoIrpj = 10;                        // LC 224/2025: IRPJ desde 01/01/2026
+      p.acrescimoCsll = trimestre >= 2 ? 10 : 0;   // CSLL desde 01/04/2026 (noventena); P&R Receita v5, perg. 12 e 13
+    } else if (ano >= 2027) {
+      p.acrescimoIrpj = 20;                        // LC 239/2026: 20% a partir de 2027
+      p.acrescimoCsll = (ano === 2027 && trimestre === 1) ? 10 : 20; // CSLL 20% só a partir de 01/03/2027 (a confirmar)
+    }
+    return p;
+  }
+
+  // Reparte 'total' (centavos) na proporção dos 'pesos', sem perder centavos.
+  function repartir(total, pesos) {
+    const s = soma(pesos);
+    if (total <= 0 || s <= 0) return pesos.map(() => 0);
+    const exatos = pesos.map(w => total * (w / s));
+    const partes = exatos.map(Math.floor);
+    let resto = total - soma(partes);
+    const ordem = exatos.map((x, i) => ({ i, f: x - partes[i] })).sort((a, b) => b.f - a.f);
+    for (let k = 0; resto > 0 && k < ordem.length; k++, resto--) partes[ordem[k].i] += 1;
+    return partes;
+  }
+
+  // Base presumida de um tributo, atividade por atividade, com o acréscimo sobre a parcela acima do limite.
+  // O excedente é repartido entre as atividades na proporção da receita de cada uma (IN RFB 2.305/2025, art. 15, § 3º).
+  function basesDoTributo(linhas, chave, acrescimo, limite) {
+    const receitas = linhas.map(l => l.liquida);
+    const total = soma(receitas);
+    const excedente = (acrescimo > 0 && total > limite) ? total - limite : 0;
+    const exc = repartir(excedente, receitas);
+    return linhas.map((l, i) => {
+      const p = l[chave];
+      const x = exc[i];
+      const n = l.liquida - x;
+      const baseNormal = Math.round(n * p / 100);
+      const baseAcr = Math.round(x * p * (100 + acrescimo) / 10000);
+      return {
+        nome: l.nome, receita: l.liquida, p,
+        pAcr: Math.round(p * (100 + acrescimo) * 100) / 10000,
+        normal: n, excedente: x, baseNormal, baseAcr, base: baseNormal + baseAcr
+      };
+    });
+  }
+
+  // Forma de pagamento do IRPJ ou da CSLL (Lei 9.430/1996, art. 5º): quota única ou até 3 quotas de no mínimo R$ 1.000,00.
+  function quotas(valor) {
+    if (valor <= 0) return { tipo: 'zero', n: 0 };
+    if (valor < 1000) return { tipo: 'minimo', n: 0 };     // DARF abaixo de R$ 10,00 não é recolhido; soma-se ao período seguinte
+    if (valor < 200000) return { tipo: 'unica', n: 1, quota: valor };
+    const n = Math.min(3, Math.floor(valor / 100000));
+    const q = Math.floor(valor / n);
+    return { tipo: 'quotas', n, quota: q, ultima: valor - q * (n - 1) };
+  }
+
+  // Meses de vencimento: o 1º é o da quota única; os três são os das quotas.
+  function vencimentos(ano, trimestre) {
+    const v = [];
+    for (let k = 1; k <= 3; k++) {
+      let m = trimestre * 3 + k, a = ano;
+      if (m > 12) { m -= 12; a += 1; }
+      v.push({ mes: m, nomeMes: MESES[m - 1], ano: a });
+    }
+    return v;
+  }
+
+  function calcular(e) {
+    e = e || {};
+    const avisos = [];
+    const erro = texto => avisos.push({ nivel: 'erro', texto });
+    const ano = Number(e.ano) || 2026;
+    const trimestre = Math.min(4, Math.max(1, Number(e.trimestre) || 1));
+    const meses = Math.min(3, Math.max(1, Number(e.meses) || 3));
+    const padrao = parametrosPadrao(ano, trimestre);
+    const par = Object.assign({}, padrao);
+    const ov = e.parametros || {};
+    [['acrescimoIrpj', 'acréscimo do IRPJ'], ['acrescimoCsll', 'acréscimo da CSLL']].forEach(([k, nome]) => {
+      if (ov[k] === undefined || ov[k] === null || ov[k] === '') return;
+      const x = Number(ov[k]);
+      if (isFinite(x) && x >= 0 && x <= 100) par[k] = x; else erro(`O ${nome} precisa ser um percentual entre 0 e 100.`);
+    });
+    if (ov.limite !== undefined && ov.limite !== null && ov.limite !== '') {
+      const c = centavos(ov.limite);
+      if (c >= 0) par.limite = c; else erro('O limite do trimestre precisa ser um valor em reais, zero ou positivo.');
+    }
+
+    // Receita por atividade
+    const linhas = [];
+    (e.atividades || []).forEach((a, i) => {
+      const def = atividade(a.tipo);
+      const nLinha = `Atividade ${i + 1}`;
+      if (!def) { erro(`${nLinha}: tipo de atividade desconhecido.`); return; }
+      const receita = centavos(a.receita), deducoes = centavos(a.deducoes);
+      if (isNaN(receita) || isNaN(deducoes)) { erro(`${nLinha}: valor em reais inválido. Use, por exemplo, 100.000,00.`); return; }
+      if (receita < 0 || deducoes < 0) { erro(`${nLinha}: valores negativos não são aceitos.`); return; }
+      if (receita === 0 && deducoes === 0) return;
+      let pIrpj = def.irpj, pCsll = def.csll;
+      if (def.id === 'outra') {
+        pIrpj = Number(a.pIrpj); pCsll = Number(a.pCsll);
+        const ok = v => v !== '' && v !== null && v !== undefined;
+        if (!ok(a.pIrpj) || !ok(a.pCsll) || !(pIrpj >= 0 && pIrpj <= 100) || !(pCsll >= 0 && pCsll <= 100)) {
+          erro(`${nLinha}: informe os percentuais de presunção do IRPJ e da CSLL (entre 0 e 100).`); return;
+        }
+      }
+      if (deducoes > receita) erro(`${nLinha}: as devoluções e descontos passam da receita bruta. A atividade entrou com receita zero.`);
+      const liquida = Math.max(0, receita - deducoes);
+      if (def.id === 'servicos_ate_120mil' && liquida > 12000000) {
+        avisos.push({ nivel: 'atencao', texto: 'A receita de serviços deste trimestre já passa de R$ 120.000,00. O percentual de 16% só vale com receita anual de até R$ 120 mil: use 32% e refaça os trimestres anteriores do ano.' });
+      }
+      linhas.push({ id: def.id, nome: def.curto, receita, deducoes: receita - liquida, liquida, pIrpj, pCsll });
+    });
+
+    const receitaBruta = soma(linhas.map(l => l.receita));
+    const deducoesTotal = soma(linhas.map(l => l.deducoes));
+    const receitaLiquida = soma(linhas.map(l => l.liquida));
+
+    // Valores avulsos (outras receitas e retenções)
+    const avulso = (v, nome) => {
+      const c = centavos(v);
+      if (isNaN(c) || c < 0) { erro(`${nome}: valor inválido. Use um valor em reais, zero ou positivo.`); return 0; }
+      return c;
+    };
+    const o = e.outras || {};
+    const outras = {
+      ganhos: avulso(o.ganhosCapital, 'Ganhos de capital'),
+      financeiras: avulso(o.receitasFinanceiras, 'Receitas financeiras'),
+      demais: avulso(o.demaisReceitas, 'Demais receitas')
+    };
+    const outrasTotal = outras.ganhos + outras.financeiras + outras.demais;
+    const rt = e.retencoes || {};
+    const ret = {
+      irrf: avulso(rt.irrf, 'IRRF retido'), csll: avulso(rt.csll, 'CSLL retida'),
+      pis: avulso(rt.pis, 'PIS retido'), cofins: avulso(rt.cofins, 'COFINS retida')
+    };
+
+    // IRPJ
+    const bIrpj = basesDoTributo(linhas, 'pIrpj', par.acrescimoIrpj, par.limite);
+    const presumidoIrpj = soma(bIrpj.map(b => b.base));
+    const baseIrpj = presumidoIrpj + outrasTotal;
+    const irpjNormal = Math.round(baseIrpj * 15 / 100);
+    const limiteAdicional = LIMITE_ADICIONAL_MES * meses;
+    const excedenteAdicional = Math.max(0, baseIrpj - limiteAdicional);
+    const adicional = Math.round(excedenteAdicional * 10 / 100);
+    const irpjDevido = irpjNormal + adicional;
+    const irpjPagar = Math.max(0, irpjDevido - ret.irrf);
+
+    // CSLL
+    const bCsll = basesDoTributo(linhas, 'pCsll', par.acrescimoCsll, par.limite);
+    const presumidoCsll = soma(bCsll.map(b => b.base));
+    const baseCsll = presumidoCsll + outrasTotal;
+    const csllDevida = Math.round(baseCsll * 9 / 100);
+    const csllPagar = Math.max(0, csllDevida - ret.csll);
+
+    // PIS e COFINS cumulativos (Lei 9.718/1998): só até 2026
+    let pisCofins = null;
+    if (par.pisCofins) {
+      const exclusoes = avulso(e.exclusoesPisCofins, 'Exclusões da base de PIS e COFINS');
+      const base = Math.max(0, receitaLiquida - exclusoes);
+      const pis = Math.round(base * 65 / 10000);
+      const cofins = Math.round(base * 3 / 100);
+      const mesesPC = [0, 1, 2].map(k => {
+        const m = trimestre * 3 - 2 + k;
+        let mv = m + 1, av = ano;
+        if (mv > 12) { mv = 1; av += 1; }
+        return { competencia: MESES[m - 1], vencimento: `25 de ${MESES[mv - 1]} de ${av}` };
+      });
+      pisCofins = {
+        exclusoes: Math.min(exclusoes, receitaLiquida), base, pis, cofins,
+        pisRetido: ret.pis, cofinsRetida: ret.cofins,
+        pisPagar: Math.max(0, pis - ret.pis), cofinsPagar: Math.max(0, cofins - ret.cofins),
+        pisSaldo: Math.max(0, ret.pis - pis), cofinsSaldo: Math.max(0, ret.cofins - cofins),
+        meses: mesesPC
+      };
+    }
+
+    // Avisos sobre as regras aplicadas
+    if ((par.acrescimoIrpj > 0 || par.acrescimoCsll > 0) && receitaLiquida > par.limite) {
+      const partes = [];
+      if (par.acrescimoIrpj > 0) partes.push(`${pct(par.acrescimoIrpj)} no IRPJ`);
+      if (par.acrescimoCsll > 0) partes.push(`${pct(par.acrescimoCsll)} na CSLL`);
+      let t = `Receita do trimestre acima de ${fmtR(par.limite)}. Sobre a parcela excedente (${fmtR(receitaLiquida - par.limite)}), os percentuais de presunção sobem ${partes.join(' e ')}.`;
+      if (linhas.length > 1) t += ' O excedente foi repartido entre as atividades na proporção da receita de cada uma.';
+      if (par.acrescimoCsll === 0 && ano === 2026) t += ' Na CSLL o acréscimo só vale a partir do 2º trimestre de 2026.';
+      avisos.push({ nivel: 'info', texto: t });
+    }
+    if (ano === 2027 && trimestre === 1 && par.acrescimoCsll === 10 && receitaLiquida > par.limite) {
+      avisos.push({ nivel: 'atencao', texto: 'CSLL do 1º trimestre de 2027: o acréscimo de 20% da LC 239/2026 começa em 1º de março de 2027, segundo as notícias. A calculadora usou 10% no trimestre inteiro. Confira a orientação da Receita.' });
+    }
+    if (meses < 3) {
+      avisos.push({ nivel: 'info', texto: `Com ${meses} ${meses === 1 ? 'mês' : 'meses'} de atividade, o adicional de IRPJ incide sobre o que passar de ${fmtR(limiteAdicional)}.` });
+    }
+    if (receitaBruta > LIMITE_OPCAO_TRIMESTRE) {
+      avisos.push({ nivel: 'atencao', texto: 'Esta receita, repetida por quatro trimestres, passa de R$ 78 milhões no ano. Acima desse valor a empresa não pode ficar no lucro presumido no ano seguinte.' });
+    }
+    if (ret.irrf > irpjDevido) avisos.push({ nivel: 'info', texto: `O IRRF retido passa do IRPJ devido. A diferença (${fmtR(ret.irrf - irpjDevido)}) é saldo negativo, que pode ser compensado depois.` });
+    if (ret.csll > csllDevida) avisos.push({ nivel: 'info', texto: `A CSLL retida passa da CSLL devida. A diferença (${fmtR(ret.csll - csllDevida)}) pode ser compensada depois.` });
+
+    const totalDevido = irpjDevido + csllDevida + (pisCofins ? pisCofins.pis + pisCofins.cofins : 0);
+    const totalPagar = irpjPagar + csllPagar + (pisCofins ? pisCofins.pisPagar + pisCofins.cofinsPagar : 0);
+
+    return {
+      ano, trimestre, meses, parametros: par, padrao,
+      linhas, receitaBruta, deducoesTotal, receitaLiquida, outras, outrasTotal,
+      irpj: {
+        linhas: bIrpj, presumido: presumidoIrpj, base: baseIrpj, normal: irpjNormal,
+        limiteAdicional, excedenteAdicional, adicional, devido: irpjDevido,
+        retido: ret.irrf, pagar: irpjPagar, saldoNegativo: Math.max(0, ret.irrf - irpjDevido), quotas: quotas(irpjPagar)
+      },
+      csll: {
+        linhas: bCsll, presumido: presumidoCsll, base: baseCsll, devida: csllDevida,
+        retida: ret.csll, pagar: csllPagar, saldoNegativo: Math.max(0, ret.csll - csllDevida), quotas: quotas(csllPagar)
+      },
+      pisCofins,
+      totalDevido, totalPagar,
+      carga: receitaLiquida > 0 ? totalDevido / receitaLiquida : 0,
+      vencimentos: vencimentos(ano, trimestre),
+      avisos
+    };
+  }
+
+  return { ATIVIDADES, MESES, LIMITE_TRIMESTRAL, atividade, parametrosPadrao, repartir, quotas, vencimentos, calcular };
+})();
+</script>
+
+<script>
+(function () {
+  'use strict';
+  const M = globalThis.MotorLP;
+  const $ = (s, el) => (el || document).querySelector(s);
+  const $$ = (s, el) => Array.from((el || document).querySelectorAll(s));
+  const nf2 = new Intl.NumberFormat('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  const nfp = new Intl.NumberFormat('pt-BR', { maximumFractionDigits: 4 });
+  const fmt = c => nf2.format(c / 100);
+  const fmtR = c => 'R$ ' + fmt(c);
+  const pct = p => nfp.format(p) + '%';
+  const esc = s => String(s).replace(/[&<>"]/g, ch => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[ch]));
+
+  // Texto digitado em reais (formato brasileiro) -> centavos. Vazio vira 0; inválido vira NaN.
+  function lerCentavos(txt) {
+    let s = String(txt || '').replace(/R\$|\s/g, '');
+    if (s === '') return 0;
+    if (s.includes(',')) s = s.replace(/\./g, '').replace(',', '.');
+    else if (/^\d{1,3}(\.\d{3})+$/.test(s)) s = s.replace(/\./g, '');
+    if (!/^\d*\.?\d*$/.test(s) || s === '.') return NaN;
+    const n = Number(s);
+    return isFinite(n) ? Math.round(n * 100) : NaN;
+  }
+  const paraReais = c => (isNaN(c) ? NaN : c / 100);
+  function lerPercentual(txt) {
+    const s = String(txt || '').replace(/%|\s/g, '').replace(',', '.');
+    if (s === '') return '';
+    const n = Number(s);
+    return isFinite(n) ? n : NaN;
+  }
+
+  // ---------- Linhas de atividade ----------
+  const caixa = $('#atividades');
+  const opcoes = M.ATIVIDADES.map(a =>
+    `<option value="${a.id}">${esc(a.curto)}${a.irpj != null ? ` · IRPJ ${pct(a.irpj)} · CSLL ${pct(a.csll)}` : ''}</option>`).join('');
+  let seq = 0;
+
+  function atualizarLinha(div) {
+    const n = div.dataset.n;
+    const def = M.atividade($('#atv-tipo-' + n).value);
+    $('.atv-desc', div).textContent = def ? def.desc + (def.base ? ` (${def.base})` : '') : '';
+    $('.atv-pcts', div).hidden = !(def && def.id === 'outra');
+  }
+
+  function novaLinha(d) {
+    d = d || {};
+    const n = ++seq;
+    const div = document.createElement('div');
+    div.className = 'atv';
+    div.dataset.n = String(n);
+    div.innerHTML = `
+      <label class="campo atv-tipo"><span>Atividade</span><select id="atv-tipo-${n}">${opcoes}</select></label>
+      <label class="campo campo-receita"><span>Receita bruta (R$)</span><input id="atv-receita-${n}" class="dinheiro" inputmode="decimal" placeholder="0,00"></label>
+      <label class="campo campo-deducoes"><span>Devoluções e descontos (R$)</span><input id="atv-deducoes-${n}" class="dinheiro" inputmode="decimal" placeholder="0,00"></label>
+      <button type="button" class="btn-remover" aria-label="Remover esta atividade" title="Remover atividade">&times;</button>
+      <p class="atv-desc"></p>
+      <div class="atv-pcts" hidden>
+        <label class="campo"><span>Presunção do IRPJ (%)</span><input id="atv-pirpj-${n}" class="pctin" inputmode="decimal"></label>
+        <label class="campo"><span>Presunção da CSLL (%)</span><input id="atv-pcsll-${n}" class="pctin" inputmode="decimal"></label>
+      </div>`;
+    caixa.appendChild(div);
+    $('#atv-tipo-' + n).value = d.tipo || 'servicos';
+    $('#atv-receita-' + n).value = d.receita ? fmt(Math.round(d.receita * 100)) : '';
+    $('#atv-deducoes-' + n).value = d.deducoes ? fmt(Math.round(d.deducoes * 100)) : '';
+    atualizarLinha(div);
+    return div;
+  }
+
+  caixa.addEventListener('click', ev => {
+    const b = ev.target.closest('.btn-remover');
+    if (!b) return;
+    const div = b.closest('.atv');
+    if ($$('.atv').length > 1) div.remove();
+    else $$('input', div).forEach(i => { i.value = ''; });
+    marcarExemplo(null);
+    recalcular();
+  });
+  caixa.addEventListener('change', ev => {
+    if (ev.target.matches('select')) atualizarLinha(ev.target.closest('.atv'));
+  });
+  $('#add-atv').addEventListener('click', () => {
+    const div = novaLinha({ tipo: 'comercio' });
+    $('select', div).focus();
+    marcarExemplo(null);
+    recalcular();
+  });
+
+  // ---------- Período e parâmetros da lei ----------
+  function notaPeriodo(ano) {
+    if (ano <= 2025) return 'Sem acréscimo nos percentuais de presunção (regra anterior à Lei Complementar 224/2025).';
+    if (ano === 2026) return '2026: os percentuais de presunção sobem 10% sobre a receita que passar de R$ 1.250.000,00 no trimestre. Vale para o IRPJ desde o 1º trimestre e para a CSLL desde o 2º.';
+    return '2027: o acréscimo passa a 20% (Lei Complementar 239/2026) sobre a receita que passar de R$ 1.250.000,00 no trimestre. O PIS e a COFINS deixam de existir e dão lugar à CBS, que esta calculadora não calcula.';
+  }
+  function preencherParametros() {
+    const ano = Number($('#ano').value), tri = Number($('#trimestre').value);
+    const p = M.parametrosPadrao(ano, tri);
+    $('#acr-irpj').value = nfp.format(p.acrescimoIrpj);
+    $('#acr-csll').value = nfp.format(p.acrescimoCsll);
+    $('#limite').value = fmt(p.limite);
+    $('#bloco-pc').hidden = !p.pisCofins;
+    $('#nota-periodo').textContent = notaPeriodo(ano);
+  }
+  ['ano', 'trimestre'].forEach(id => $('#' + id).addEventListener('change', () => { preencherParametros(); recalcular(); }));
+  $('#restaurar').addEventListener('click', () => { preencherParametros(); recalcular(); });
+
+  // ---------- Leitura do formulário ----------
+  function lerEntrada() {
+    const v = id => paraReais(lerCentavos($('#' + id).value));
+    return {
+      ano: Number($('#ano').value), trimestre: Number($('#trimestre').value), meses: Number($('#meses').value),
+      atividades: $$('.atv').map(div => {
+        const n = div.dataset.n;
+        return {
+          tipo: $('#atv-tipo-' + n).value,
+          receita: paraReais(lerCentavos($('#atv-receita-' + n).value)),
+          deducoes: paraReais(lerCentavos($('#atv-deducoes-' + n).value)),
+          pIrpj: lerPercentual($('#atv-pirpj-' + n).value),
+          pCsll: lerPercentual($('#atv-pcsll-' + n).value)
+        };
+      }),
+      outras: { ganhosCapital: v('ganhos'), receitasFinanceiras: v('financeiras'), demaisReceitas: v('demais') },
+      retencoes: { irrf: v('ret-irrf'), csll: v('ret-csll'), pis: v('ret-pis'), cofins: v('ret-cofins') },
+      exclusoesPisCofins: v('exclusoes'),
+      parametros: {
+        acrescimoIrpj: lerPercentual($('#acr-irpj').value),
+        acrescimoCsll: lerPercentual($('#acr-csll').value),
+        limite: $('#limite').value.trim() === '' ? '' : v('limite')
+      }
+    };
+  }
+
+  // ---------- Memória de cálculo ----------
+  const valorTxt = l => (l.tipo === 'deducao' ? '(' + fmt(Math.abs(l.valor)) + ')' : fmt(l.valor));
+  const linhaHtml = l => `<div class="lr ${l.tipo || ''}"><span class="rot">${esc(l.rot)}${l.f ? `<span class="f">${esc(l.f)}</span>` : ''}</span><span class="val">${valorTxt(l)}</span></div>`;
+
+  function passoBase(titulo, totalRot, bases, r, acrescimo, base) {
+    const p = { titulo, linhas: [] };
+    if (!bases.length) p.linhas.push({ rot: 'Nenhuma receita de atividade informada', valor: 0 });
+    bases.forEach(b => {
+      if (b.excedente > 0) {
+        p.linhas.push({ rot: `${b.nome}: até o limite`, f: `${fmt(b.normal)} × ${pct(b.p)}`, valor: b.baseNormal });
+        p.linhas.push({ rot: `${b.nome}: parcela excedente`, f: `${fmt(b.excedente)} × ${pct(b.pAcr)}, isto é, ${pct(b.p)} × ${nfp.format(1 + acrescimo / 100)}`, valor: b.baseAcr });
+      } else {
+        p.linhas.push({ rot: b.nome, f: `${fmt(b.receita)} × ${pct(b.p)}`, valor: b.base });
+      }
+    });
+    if (r.outras.ganhos) p.linhas.push({ rot: '(+) Ganhos de capital', valor: r.outras.ganhos });
+    if (r.outras.financeiras) p.linhas.push({ rot: '(+) Receitas financeiras', valor: r.outras.financeiras });
+    if (r.outras.demais) p.linhas.push({ rot: '(+) Demais receitas', valor: r.outras.demais });
+    p.linhas.push({ rot: totalRot, valor: base, tipo: 'total' });
+    return p;
+  }
+
+  function montarPassos(r) {
+    const P = [];
+    const p1 = { titulo: 'Receita bruta do trimestre', linhas: [] };
+    if (!r.linhas.length) p1.linhas.push({ rot: 'Nenhuma receita informada', valor: 0 });
+    r.linhas.forEach(l => p1.linhas.push({ rot: l.nome, f: `IRPJ ${pct(l.pIrpj)} · CSLL ${pct(l.pCsll)}`, valor: l.receita }));
+    if (r.deducoesTotal > 0) p1.linhas.push({ rot: '(−) Devoluções, vendas canceladas e descontos incondicionais', valor: -r.deducoesTotal, tipo: 'deducao' });
+    p1.linhas.push({ rot: 'Receita bruta para a presunção', valor: r.receitaLiquida, tipo: 'total' });
+    P.push(p1);
+
+    P.push(passoBase('Base de cálculo do IRPJ', 'Base de cálculo do IRPJ', r.irpj.linhas, r, r.parametros.acrescimoIrpj, r.irpj.base));
+
+    const i = r.irpj;
+    const p3 = { titulo: 'IRPJ', linhas: [
+      { rot: 'IRPJ à alíquota de 15%', f: `15% × ${fmt(i.base)}`, valor: i.normal },
+      { rot: 'Adicional de 10%', f: i.excedenteAdicional > 0 ? `10% × (${fmt(i.base)} − ${fmt(i.limiteAdicional)})` : `a base não passa de ${fmt(i.limiteAdicional)}`, valor: i.adicional },
+      { rot: 'IRPJ devido', valor: i.devido, tipo: 'subtotal' }
+    ] };
+    if (i.retido) p3.linhas.push({ rot: '(−) IRRF retido sobre receitas do trimestre', valor: -Math.min(i.retido, i.devido), tipo: 'deducao' });
+    p3.linhas.push({ rot: 'IRPJ a pagar', f: 'DARF código 2089', valor: i.pagar, tipo: 'total' });
+    if (i.saldoNegativo) p3.linhas.push({ rot: 'Saldo negativo de IRPJ, a compensar', valor: i.saldoNegativo, tipo: 'nota' });
+    P.push(p3);
+
+    P.push(passoBase('Base de cálculo da CSLL', 'Base de cálculo da CSLL', r.csll.linhas, r, r.parametros.acrescimoCsll, r.csll.base));
+
+    const c = r.csll;
+    const p5 = { titulo: 'CSLL', linhas: [{ rot: 'CSLL à alíquota de 9%', f: `9% × ${fmt(c.base)}`, valor: c.devida }] };
+    if (c.retida) {
+      p5.linhas[0].tipo = 'subtotal';
+      p5.linhas.push({ rot: '(−) CSLL retida na fonte', valor: -Math.min(c.retida, c.devida), tipo: 'deducao' });
+    }
+    p5.linhas.push({ rot: 'CSLL a pagar', f: 'DARF código 2372', valor: c.pagar, tipo: 'total' });
+    if (c.saldoNegativo) p5.linhas.push({ rot: 'CSLL retida a maior, a compensar', valor: c.saldoNegativo, tipo: 'nota' });
+    P.push(p5);
+
+    if (r.pisCofins) {
+      const pc = r.pisCofins;
+      const p6 = { titulo: 'PIS e COFINS (regime cumulativo)', nota: 'Apurados mês a mês e pagos até o dia 25 do mês seguinte. Aqui aparecem somados no trimestre.', linhas: [] };
+      if (pc.exclusoes) {
+        p6.linhas.push({ rot: 'Receita bruta', valor: r.receitaLiquida });
+        p6.linhas.push({ rot: '(−) Exclusões: ICMS destacado, exportações', valor: -pc.exclusoes, tipo: 'deducao' });
+      }
+      p6.linhas.push({ rot: 'Base de PIS e COFINS', valor: pc.base, tipo: 'subtotal' });
+      p6.linhas.push({ rot: 'PIS', f: `0,65% × ${fmt(pc.base)}`, valor: pc.pis });
+      if (pc.pisRetido) p6.linhas.push({ rot: '(−) PIS retido', valor: -Math.min(pc.pisRetido, pc.pis), tipo: 'deducao' });
+      p6.linhas.push({ rot: 'PIS a pagar', f: 'DARF código 8109', valor: pc.pisPagar, tipo: 'total' });
+      p6.linhas.push({ rot: 'COFINS', f: `3% × ${fmt(pc.base)}`, valor: pc.cofins });
+      if (pc.cofinsRetida) p6.linhas.push({ rot: '(−) COFINS retida', valor: -Math.min(pc.cofinsRetida, pc.cofins), tipo: 'deducao' });
+      p6.linhas.push({ rot: 'COFINS a pagar', f: 'DARF código 2172', valor: pc.cofinsPagar, tipo: 'total' });
+      P.push(p6);
+    } else {
+      P.push({ titulo: 'PIS e COFINS', nota: 'A partir de 2027 o PIS e a COFINS deixam de existir e dão lugar à CBS (Lei Complementar 214/2025). Esta calculadora não calcula a CBS.', linhas: [] });
+    }
+    return P;
+  }
+
+  function formaPagamento(q, v) {
+    switch (q.tipo) {
+      case 'zero': return 'Nada a pagar.';
+      case 'minimo': return 'Abaixo de R$ 10,00: não se emite DARF; o valor é somado ao do período seguinte.';
+      case 'unica': return 'Quota única. Abaixo de R$ 2.000,00 não pode ser dividido.';
+      default: {
+        const mesesQ = v.slice(0, q.n).map(x => x.nomeMes).join(', ');
+        return `Quota única, ou até ${q.n} quotas de ${fmtR(q.quota)} (${mesesQ}). A 2ª e a 3ª quotas levam juros: Selic acumulada mais 1%.`;
+      }
+    }
+  }
+
+  function renderPagamento(r) {
+    const v = r.vencimentos;
+    const ultimoDia = `Último dia útil de ${v[0].nomeMes} de ${v[0].ano}`;
+    const linhas = [
+      ['IRPJ', '2089', ultimoDia, formaPagamento(r.irpj.quotas, v)],
+      ['CSLL', '2372', ultimoDia, formaPagamento(r.csll.quotas, v)]
+    ];
+    if (r.pisCofins) {
+      const venc = r.pisCofins.meses.map(m => `${m.competencia}: ${m.vencimento}`).join('; ');
+      linhas.push(['PIS', '8109', venc, 'Mensal, sobre a receita de cada mês.']);
+      linhas.push(['COFINS', '2172', venc, 'Mensal, sobre a receita de cada mês.']);
+    }
+    $('#tab-pagamento tbody').innerHTML = linhas.map(l =>
+      `<tr><td>${l[0]}</td><td class="mono">${l[1]}</td><td>${esc(l[2])}</td><td>${esc(l[3])}</td></tr>`).join('');
+    return linhas;
+  }
+
+  let textoAtual = '';
+  function montarTexto(r, passos, pagamento) {
+    const L = [`LUCRO PRESUMIDO: ${r.trimestre}º trimestre de ${r.ano}`];
+    passos.forEach((p, k) => {
+      L.push('', `${k + 1}. ${p.titulo.toUpperCase()}`);
+      if (p.nota) L.push(p.nota);
+      p.linhas.forEach(l => L.push(`${l.rot}${l.f ? ' [' + l.f + ']' : ''}: ${valorTxt(l)}`));
+    });
+    L.push('', `Tributos devidos no trimestre: ${fmtR(r.totalDevido)}`);
+    if (r.totalPagar !== r.totalDevido) L.push(`A pagar depois das retenções: ${fmtR(r.totalPagar)}`);
+    if (r.receitaLiquida > 0) L.push(`Carga sobre a receita: ${(r.carga * 100).toFixed(2).replace('.', ',')}%`);
+    L.push('', 'COMO PAGAR');
+    pagamento.forEach(l => L.push(`${l[0]} (DARF ${l[1]}): ${l[2]}. ${l[3]}`));
+    if (r.avisos.length) { L.push('', 'OBSERVAÇÕES'); r.avisos.forEach(a => L.push('- ' + a.texto)); }
+    return L.join('\n');
+  }
+
+  function render(r) {
+    $('#total-devido').textContent = fmtR(r.totalDevido);
+    $('#carga').textContent = (r.carga * 100).toFixed(2).replace('.', ',') + '%';
+    const chips = [
+      ['IRPJ', r.irpj.devido], ['CSLL', r.csll.devida],
+      ['PIS', r.pisCofins ? r.pisCofins.pis : null], ['COFINS', r.pisCofins ? r.pisCofins.cofins : null]
+    ];
+    $('#tributos').innerHTML = chips.map(([n, v]) =>
+      `<div class="trib"><span class="rotulo">${n}</span><span class="v">${v === null ? 'extinto' : fmt(v)}</span></div>`).join('');
+    const ap = $('#a-pagar');
+    ap.hidden = r.totalPagar === r.totalDevido;
+    ap.textContent = `Depois das retenções na fonte, a pagar: ${fmtR(r.totalPagar)}.`;
+
+    const ul = $('#avisos');
+    const rot = { erro: 'Corrija', info: 'Regra aplicada', atencao: 'Atenção' };
+    ul.innerHTML = r.avisos.map(a => `<li class="aviso ${a.nivel}"><b>${rot[a.nivel]}:</b> ${esc(a.texto)}</li>`).join('');
+    ul.hidden = r.avisos.length === 0;
+
+    const passos = montarPassos(r);
+    $('#razao').innerHTML = passos.map((p, k) =>
+      `<section class="passo"><h3><span class="n">${k + 1}</span>${esc(p.titulo)}</h3>${p.nota ? `<p class="passo-nota">${esc(p.nota)}</p>` : ''}${p.linhas.map(linhaHtml).join('')}</section>`).join('');
+    const pagamento = renderPagamento(r);
+    textoAtual = montarTexto(r, passos, pagamento);
+    const ta = $('#copia-texto');
+    if (!ta.hidden) ta.value = textoAtual;
+  }
+
+  function recalcular() {
+    try {
+      render(M.calcular(lerEntrada()));
+    } catch (err) {
+      const ul = $('#avisos');
+      ul.innerHTML = `<li class="aviso erro"><b>Erro no cálculo:</b> ${esc(err && err.message ? err.message : err)}</li>`;
+      ul.hidden = false;
+    }
+  }
+
+  // ---------- Exemplos ----------
+  const EXEMPLOS = {
+    aula: { rotulo: 'Prestadora de serviços com receita de R$ 100 mil no trimestre: 32% de presunção.',
+      ano: 2026, trimestre: 4, atividades: [{ tipo: 'servicos', receita: 100000 }] },
+    retencoes: { rotulo: 'Serviços de R$ 300 mil com IRRF de 1,5%, CSLL, PIS e COFINS retidos pelos clientes, e R$ 4 mil de rendimento de aplicação (com R$ 800 de IRRF).',
+      ano: 2026, trimestre: 4, atividades: [{ tipo: 'servicos', receita: 300000 }],
+      outras: { financeiras: 4000 }, retencoes: { irrf: 5300, csll: 3000, pis: 1950, cofins: 9000 } },
+    pr11: { rotulo: 'Exemplo da Receita Federal (Perguntas e Respostas v5, pergunta 11): comércio com R$ 1,5 milhão no 1º trimestre de 2026.',
+      ano: 2026, trimestre: 1, atividades: [{ tipo: 'comercio', receita: 1500000 }] },
+    pr14: { rotulo: 'Exemplo da Receita Federal (Perguntas e Respostas v5, pergunta 14): R$ 1,44 milhão de comércio e R$ 360 mil de serviços no 1º trimestre de 2026.',
+      ano: 2026, trimestre: 1, atividades: [{ tipo: 'comercio', receita: 1440000 }, { tipo: 'servicos', receita: 360000 }] }
+  };
+
+  function marcarExemplo(id) {
+    $$('.chip').forEach(b => b.setAttribute('aria-pressed', String(b.dataset.exemplo === id && id !== 'limpar')));
+    const ex = id && EXEMPLOS[id];
+    $('#estado-ex').textContent = ex ? `Exemplo carregado. ${ex.rotulo} Altere qualquer campo para usar os seus números.` : '';
+  }
+
+  function carregar(id) {
+    const ex = EXEMPLOS[id] || { ano: Number($('#ano').value), trimestre: Number($('#trimestre').value), atividades: [{ tipo: 'servicos' }] };
+    $('#ano').value = String(ex.ano);
+    $('#trimestre').value = String(ex.trimestre);
+    $('#meses').value = '3';
+    caixa.innerHTML = '';
+    (ex.atividades || [{}]).forEach(novaLinha);
+    const set = (idCampo, reais) => { $('#' + idCampo).value = reais ? fmt(Math.round(reais * 100)) : ''; };
+    const o = ex.outras || {}, rt = ex.retencoes || {};
+    set('ganhos', o.ganhos); set('financeiras', o.financeiras); set('demais', o.demais);
+    set('ret-irrf', rt.irrf); set('ret-csll', rt.csll); set('ret-pis', rt.pis); set('ret-cofins', rt.cofins);
+    set('exclusoes', ex.exclusoes);
+    preencherParametros();
+    marcarExemplo(id);
+    recalcular();
+  }
+  $$('.chip').forEach(b => b.addEventListener('click', () => carregar(b.dataset.exemplo)));
+
+  // ---------- Eventos gerais ----------
+  const form = $('#form');
+  form.addEventListener('submit', ev => ev.preventDefault());
+  form.addEventListener('input', () => { marcarExemplo(null); recalcular(); });
+  form.addEventListener('focusout', ev => {
+    const el = ev.target;
+    if (!(el instanceof HTMLInputElement) || !el.classList.contains('dinheiro')) return;
+    if (el.value.trim() === '') return;
+    const c = lerCentavos(el.value);
+    if (!isNaN(c)) el.value = (c === 0 && el.id !== 'limite') ? '' : fmt(c);
+  });
+
+  $('#copiar').addEventListener('click', () => {
+    const status = $('#status-copia');
+    const ta = $('#copia-texto');
+    const mostrarTexto = () => {
+      ta.hidden = false; ta.value = textoAtual; ta.focus(); ta.select();
+      status.textContent = 'Selecione o texto abaixo e copie com Ctrl+C.';
+    };
+    try {
+      navigator.clipboard.writeText(textoAtual).then(
+        () => { status.textContent = 'Memória de cálculo copiada.'; },
+        mostrarTexto);
+    } catch (e) { mostrarTexto(); }
+  });
+
+  // ---------- Tabela de referência ----------
+  $('#tab-pct').innerHTML = M.ATIVIDADES.filter(a => a.irpj != null).map(a =>
+    `<tr><td>${esc(a.curto)}</td><td class="num">${pct(a.irpj)}</td><td class="num">${pct(a.csll)}</td><td>${esc(a.base)}</td></tr>`).join('');
+
+  carregar('aula');
+})();
+</script>
+</body>
+</html>
