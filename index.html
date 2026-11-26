@@ -101,6 +101,10 @@ button { cursor: pointer; }
 input, select { width: 100%; min-width: 0; color: var(--ink); background: var(--field); border: 1px solid var(--rule-strong); border-radius: 6px; padding: 8px 10px; }
 input.dinheiro, input.pctin { font-family: var(--font-num); text-align: right; font-variant-numeric: tabular-nums; }
 .nota-periodo { margin: 0; font-size: 0.84rem; color: var(--info-fg); background: var(--info-bg); border: 1px solid var(--info-rule); border-radius: 8px; padding: 8px 12px; }
+input[type="file"] { padding: 6px; font-size: 0.86rem; }
+.import-rel { display: grid; gap: 10px; font-size: 0.86rem; border: 1px solid var(--rule); border-radius: 8px; padding: 12px; background: var(--field); min-width: 0; }
+.import-rel p { margin: 0; }
+.import-rel .lista { font-size: 0.86rem; }
 
 .atividades { display: grid; }
 .atv { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) 2.4rem; gap: 8px 10px; align-items: end; padding-block: 12px; border-bottom: 1px dashed var(--rule); }
@@ -238,6 +242,16 @@ textarea.copia { width: 100%; min-height: 12rem; font-family: var(--font-num); f
         <p class="nota-periodo" id="nota-periodo"></p>
       </section>
 
+      <section class="secao" aria-labelledby="t-xml">
+        <h2 id="t-xml">Importar notas fiscais (XML)</h2>
+        <p class="ajuda">Opcional. Selecione os XMLs das notas de serviço que a empresa <b>emitiu</b> (NFS-e do padrão nacional). A calculadora soma o valor dos serviços do trimestre e as retenções, e preenche os campos abaixo. Os arquivos são lidos só neste navegador: nada é enviado para a internet.</p>
+        <div class="campos">
+          <label class="campo"><span>Arquivos XML (pode escolher vários)</span><input type="file" id="xml-arquivos" accept=".xml,text/xml,application/xml" multiple></label>
+          <label class="campo"><span>CNPJ da empresa (se vazio, é identificado nos arquivos)</span><input id="xml-cnpj" inputmode="numeric" placeholder="00.000.000/0000-00"></label>
+        </div>
+        <div class="import-rel" id="xml-relatorio" hidden aria-live="polite"></div>
+      </section>
+
       <section class="secao" aria-labelledby="t-receita">
         <h2 id="t-receita">Receita bruta por atividade</h2>
         <p class="ajuda">Some o faturamento dos três meses de cada atividade. Não inclua IPI nem ICMS-ST destacados. Em "Devoluções e descontos", informe devoluções, vendas canceladas e descontos incondicionais.</p>
@@ -349,6 +363,7 @@ textarea.copia { width: 100%; min-height: 12rem; font-family: var(--font-num); f
       <h3>Fora desta calculadora</h3>
       <ul class="lista">
         <li>ISS, ICMS, contribuição previdenciária e a CBS e o IBS da reforma tributária.</li>
+        <li>Importação de XML de NF-e (nota de mercadoria) e de NFS-e em padrão municipal antigo: por enquanto, só a NFS-e do padrão nacional é lida.</li>
         <li>Ajuste do acréscimo entre trimestres do mesmo ano. A calculadora aplica o limite de R$ 1.250.000,00 a cada trimestre, como nos exemplos da Receita. Em ano com trimestres acima e abaixo do limite, confira o ajuste e, se preciso, altere o limite no bloco do acréscimo.</li>
         <li>CSLL no 1º trimestre de 2027: o acréscimo de 20% começa em 1º de março de 2027, segundo as notícias sobre a LC 239/2026. A calculadora usa 10% nesse trimestre; confira quando a Receita publicar a orientação.</li>
       </ul>
@@ -665,7 +680,177 @@ globalThis.MotorLP = (function () {
     };
   }
 
-  return { ATIVIDADES, MESES, LIMITE_TRIMESTRAL, atividade, parametrosPadrao, repartir, quotas, vencimentos, calcular };
+  /* ---------- Leitura de XML de NFS-e do padrão nacional (http://www.sped.fazenda.gov.br/nfse) ----------
+     Só leitura de texto, sem DOM: funciona no navegador e no Node (testes). */
+  const ENTIDADES = { '&amp;': '&', '&lt;': '<', '&gt;': '>', '&quot;': '"', '&apos;': "'" };
+  const desescapar = s => String(s).replace(/&(?:amp|lt|gt|quot|apos);/g, m => ENTIDADES[m]);
+  function blocoXml(xml, nome) {
+    if (!xml) return '';
+    const re = new RegExp('<(?:[\\w.-]+:)?' + nome + '(?:\\s[^>]*)?>([\\s\\S]*?)</(?:[\\w.-]+:)?' + nome + '\\s*>');
+    const m = re.exec(xml);
+    return m ? m[1] : '';
+  }
+  const textoXml = (xml, nome) => desescapar(blocoXml(xml, nome).trim());
+  function valorXml(xml, nome) {
+    const t = textoXml(xml, nome);
+    const n = t === '' ? 0 : Number(t);
+    return isFinite(n) ? Math.round(n * 100) : 0;
+  }
+  const soDigitos = s => String(s || '').replace(/\D/g, '');
+  function formatarDoc(d) {
+    d = soDigitos(d);
+    if (d.length === 14) return d.replace(/^(\d{2})(\d{3})(\d{3})(\d{4})(\d{2})$/, '$1.$2.$3/$4-$5');
+    if (d.length === 11) return d.replace(/^(\d{3})(\d{3})(\d{3})(\d{2})$/, '$1.$2.$3-$4');
+    return d;
+  }
+
+  // Retenções federais de uma NFS-e (grupo tribFed da DPS).
+  // tpRetPisCofins (NT SE/CGNFS-e 007/2026): 0 nenhum; 3 PIS, COFINS e CSLL; 4 PIS e COFINS; 5 PIS; 6 COFINS;
+  // 7 COFINS e CSLL; 8 CSLL; 9 PIS e CSLL. No leiaute 1.00: 1 PIS e COFINS retidos; 2 não retidos.
+  // Pela NT 007/2026, vRetCSLL pode trazer a soma PIS + COFINS + CSLL retidos; antes, trazia só a CSLL.
+  function retencoesNFSe(valoresDps) {
+    const fed = blocoXml(valoresDps, 'tribFed');
+    const r = { irrf: valorXml(fed, 'vRetIRRF'), csll: 0, pis: 0, cofins: 0, conferir: false };
+    if (!fed) return r;
+    const pc = blocoXml(fed, 'piscofins');
+    const tTxt = textoXml(pc, 'tpRetPisCofins');
+    const t = tTxt === '' ? null : Number(tTxt);
+    const vPis = valorXml(pc, 'vPis'), vCofins = valorXml(pc, 'vCofins'), vRetCsll = valorXml(fed, 'vRetCSLL');
+    const pisRet = [1, 3, 4, 5, 9].includes(t), cofRet = [1, 3, 4, 6, 7].includes(t), csllRet = [3, 7, 8, 9].includes(t);
+    r.pis = pisRet ? vPis : 0;
+    r.cofins = cofRet ? vCofins : 0;
+    if ((pisRet && !vPis) || (cofRet && !vCofins)) r.conferir = true;
+    const somaPC = r.pis + r.cofins;
+    if (vRetCsll > 0) {
+      if (somaPC > 0 && vRetCsll >= somaPC) r.csll = vRetCsll - somaPC;     // vRetCSLL com a soma (NT 007/2026)
+      else if (csllRet || t === null) r.csll = vRetCsll;                    // vRetCSLL só com a CSLL
+      else r.conferir = true;                                               // valor sem indicação de retenção
+    }
+    return r;
+  }
+
+  function lerNFSe(texto) {
+    const inf = blocoXml(texto, 'infNFSe');
+    if (!inf) return null;
+    const idm = /<(?:[\w.-]+:)?infNFSe\b[^>]*\bId="([^"]+)"/.exec(texto);
+    const dps = blocoXml(inf, 'infDPS');
+    const emit = blocoXml(inf, 'emit'), prest = blocoXml(dps, 'prest'), toma = blocoXml(dps, 'toma');
+    const valores = blocoXml(dps, 'valores');
+    return {
+      chave: soDigitos(idm ? idm[1] : ''),
+      numero: textoXml(inf, 'nNFSe'),
+      emitente: soDigitos(textoXml(emit, 'CNPJ') || textoXml(emit, 'CPF') || textoXml(prest, 'CNPJ') || textoXml(prest, 'CPF')),
+      emitenteNome: textoXml(emit, 'xNome'),
+      tomador: soDigitos(textoXml(toma, 'CNPJ') || textoXml(toma, 'CPF')),
+      tomadorNome: textoXml(toma, 'xNome'),
+      competencia: textoXml(dps, 'dCompet') || textoXml(dps, 'dhEmi').slice(0, 10),
+      codigo: textoXml(dps, 'cTribNac'),
+      descricao: textoXml(inf, 'xTribNac') || textoXml(dps, 'xDescServ'),
+      valor: valorXml(valores, 'vServ'),
+      desconto: valorXml(valores, 'vDescIncond'),
+      ret: retencoesNFSe(valores)
+    };
+  }
+
+  // Evento de cancelamento (e101101) ou de cancelamento por substituição (e105102): devolve a chave da nota.
+  function lerCancelamento(texto) {
+    if (!/<(?:[\w.-]+:)?(?:e101101|e105102)\b/.test(texto)) return null;
+    return soDigitos(textoXml(texto, 'chNFSe')) || null;
+  }
+
+  function trimestreDe(data) {
+    const m = /^(\d{4})-(\d{2})/.exec(data || '');
+    return m ? { ano: Number(m[1]), trimestre: Math.ceil(Number(m[2]) / 3) } : null;
+  }
+
+  // Lê vários XMLs ({nome, texto}) e soma as NFS-e emitidas pela empresa no trimestre, por código de serviço.
+  // Receita = vServ (valor do serviço); descontos incondicionais (vDescIncond) vão para "devoluções e descontos".
+  // Período da nota = data de competência (dCompet). Valores de saída em centavos.
+  function lerNotasXml(arquivos, opcoes) {
+    opcoes = opcoes || {};
+    const lista = arquivos || [];
+    const naoLidos = [], notas = [], canceladas = new Set(), vistas = new Set();
+    let duplicadas = 0;
+    lista.forEach(a => {
+      const t = String(a.texto || '');
+      const canc = lerCancelamento(t);
+      if (canc) { canceladas.add(canc); return; }
+      const n = lerNFSe(t);
+      if (n) {
+        if (n.chave && vistas.has(n.chave)) { duplicadas++; return; }
+        if (n.chave) vistas.add(n.chave);
+        n.arquivo = a.nome;
+        notas.push(n);
+        return;
+      }
+      naoLidos.push({ nome: a.nome, motivo: /<(?:[\w.-]+:)?infNFe\b/.test(t)
+        ? 'NF-e de mercadoria: este tipo de nota ainda não é lido'
+        : 'não é uma NFS-e do padrão nacional' });
+    });
+
+    // Empresa: o CNPJ informado ou, se não houver, o que mais aparece nas notas (como emitente ou tomador).
+    let cnpj = soDigitos(opcoes.cnpj), detectado = false;
+    if (!cnpj) {
+      const cont = new Map();
+      notas.forEach(n => [n.emitente, n.tomador].forEach(d => { if (d) cont.set(d, (cont.get(d) || 0) + 1); }));
+      let max = 0;
+      cont.forEach((c, d) => { if (c > max) { max = c; cnpj = d; } });
+      detectado = !!cnpj;
+    }
+    let nome = '';
+    const emitidas = [], recebidas = [], deTerceiros = [];
+    notas.forEach(n => {
+      if (cnpj && n.emitente === cnpj) { nome = nome || n.emitenteNome; emitidas.push(n); }
+      else if (cnpj && n.tomador === cnpj) { nome = nome || n.tomadorNome; recebidas.push(n); }
+      else deTerceiros.push(n);
+    });
+    const validas = emitidas.filter(n => !canceladas.has(n.chave));
+
+    // Período: o pedido; se nele não houver nota emitida, o trimestre com mais notas.
+    const porTri = new Map();
+    validas.forEach(n => { const q = trimestreDe(n.competencia); if (q) { const k = q.ano + '-' + q.trimestre; porTri.set(k, (porTri.get(k) || 0) + 1); } });
+    let ano = Number(opcoes.ano), trimestre = Number(opcoes.trimestre), periodoTrocado = false;
+    if (porTri.size && !porTri.has(ano + '-' + trimestre)) {
+      let max = 0, escolhido = '';
+      porTri.forEach((c, k) => { if (c > max || (c === max && k > escolhido)) { max = c; escolhido = k; } });
+      [ano, trimestre] = escolhido.split('-').map(Number);
+      periodoTrocado = true;
+    }
+    const noPeriodo = [], foraDoPeriodo = {};
+    validas.forEach(n => {
+      const q = trimestreDe(n.competencia);
+      if (q && q.ano === ano && q.trimestre === trimestre) { noPeriodo.push(n); return; }
+      const k = q ? `${q.trimestre}º trimestre de ${q.ano}` : 'sem data de competência';
+      foraDoPeriodo[k] = (foraDoPeriodo[k] || 0) + 1;
+    });
+
+    const grupos = new Map();
+    const retencoes = { irrf: 0, csll: 0, pis: 0, cofins: 0 };
+    let conferirRetencoes = false;
+    noPeriodo.forEach(n => {
+      const k = n.codigo || 'sem código';
+      const g = grupos.get(k) || { codigo: k, descricao: n.descricao, notas: 0, valor: 0, desconto: 0 };
+      g.notas += 1; g.valor += n.valor; g.desconto += n.desconto;
+      grupos.set(k, g);
+      retencoes.irrf += n.ret.irrf; retencoes.csll += n.ret.csll; retencoes.pis += n.ret.pis; retencoes.cofins += n.ret.cofins;
+      if (n.ret.conferir) conferirRetencoes = true;
+    });
+    if (retencoes.csll || retencoes.pis || retencoes.cofins) conferirRetencoes = true;
+
+    return {
+      cnpj, cnpjFormatado: formatarDoc(cnpj), nome, detectado,
+      ano, trimestre, periodoTrocado,
+      arquivos: lista.length, notasLidas: notas.length,
+      emitidas: noPeriodo.length, recebidas: recebidas.length, deTerceiros: deTerceiros.length,
+      canceladas: emitidas.length - validas.length, eventosCancelamento: canceladas.size, duplicadas,
+      foraDoPeriodo, naoLidos,
+      grupos: Array.from(grupos.values()).sort((a, b) => b.valor - a.valor),
+      retencoes, conferirRetencoes
+    };
+  }
+
+  return { ATIVIDADES, MESES, LIMITE_TRIMESTRAL, atividade, parametrosPadrao, repartir, quotas, vencimentos, calcular,
+    lerNotasXml, lerNFSe, formatarDoc };
 })();
 </script>
 
@@ -1021,6 +1206,78 @@ globalThis.MotorLP = (function () {
         () => { status.textContent = 'Memória de cálculo copiada.'; },
         mostrarTexto);
     } catch (e) { mostrarTexto(); }
+  });
+
+  // ---------- Importação de XML de NFS-e ----------
+  const relXml = $('#xml-relatorio');
+  const plural = (n, um, varios) => `${n} ${n === 1 ? um : varios}`;
+
+  function aplicarImportacao(r) {
+    if (r.cnpj) $('#xml-cnpj').value = r.cnpjFormatado;
+    if (r.emitidas > 0) {
+      const anoSel = r.ano <= 2025 ? 2025 : (r.ano >= 2027 ? 2027 : r.ano);
+      $('#ano').value = String(anoSel);
+      $('#trimestre').value = String(r.trimestre);
+      $('#meses').value = '3';
+      caixa.innerHTML = '';
+      r.grupos.forEach(g => novaLinha({ tipo: 'servicos', receita: g.valor / 100, deducoes: g.desconto / 100 }));
+      const set = (id, c) => { $('#' + id).value = c ? fmt(c) : ''; };
+      set('ret-irrf', r.retencoes.irrf); set('ret-csll', r.retencoes.csll);
+      set('ret-pis', r.retencoes.pis); set('ret-cofins', r.retencoes.cofins);
+      preencherParametros();
+      marcarExemplo(null);
+      recalcular();
+    }
+
+    const tri = `${r.trimestre}º trimestre de ${r.ano}`;
+    const H = [];
+    H.push(`<p><b>${plural(r.arquivos, 'arquivo lido', 'arquivos lidos')}.</b> Empresa: ${r.cnpj
+      ? esc(r.cnpjFormatado) + (r.nome ? ', ' + esc(r.nome) : '') + (r.detectado ? ' (identificada nos arquivos; se estiver errada, digite o CNPJ certo e importe de novo)' : '')
+      : 'não identificada'}.</p>`);
+    const itens = [`<b>${plural(r.emitidas, 'nota emitida', 'notas emitidas')}</b> pela empresa no ${tri}: entraram no cálculo.`];
+    if (r.periodoTrocado) itens.push(`O período mudou para o ${tri}, que é o trimestre das notas.`);
+    if (r.recebidas) itens.push(`${plural(r.recebidas, 'nota recebida', 'notas recebidas')} (serviços que a empresa contratou): não entram, porque despesa não altera o lucro presumido.`);
+    Object.keys(r.foraDoPeriodo).forEach(k => itens.push(`${plural(r.foraDoPeriodo[k], 'nota', 'notas')} do ${k}: fora do trimestre escolhido.`));
+    if (r.canceladas) itens.push(`${plural(r.canceladas, 'nota cancelada', 'notas canceladas')}: não entram.`);
+    if (r.duplicadas) itens.push(`${plural(r.duplicadas, 'arquivo repetido', 'arquivos repetidos')}: contado uma vez só.`);
+    if (r.deTerceiros) itens.push(`${plural(r.deTerceiros, 'nota', 'notas')} de outras empresas: não entram.`);
+    r.naoLidos.forEach(x => itens.push(`${esc(x.nome)}: ${esc(x.motivo)}.`));
+    H.push('<ul class="lista">' + itens.map(i => `<li>${i}</li>`).join('') + '</ul>');
+
+    if (r.emitidas === 0 && r.recebidas > 0) {
+      H.push('<p class="aviso"><b>Atenção:</b> estes XMLs são de notas que a empresa <b>recebeu</b>, como tomadora. Para o lucro presumido são necessárias as notas que ela <b>emitiu</b> para os clientes. Baixe os XMLs da área de notas emitidas do portal da NFS-e (nfse.gov.br) ou do sistema que emite as notas.</p>');
+    }
+    if (r.grupos.length) {
+      H.push('<div class="rolagem"><table class="tab"><thead><tr><th scope="col">Código</th><th scope="col">Serviço</th><th scope="col" class="num">Notas</th><th scope="col" class="num">Valor (R$)</th></tr></thead><tbody>'
+        + r.grupos.map(g => `<tr><td class="mono">${esc(g.codigo)}</td><td>${esc(g.descricao)}</td><td class="num">${g.notas}</td><td class="num">${fmt(g.valor)}</td></tr>`).join('')
+        + '</tbody></table></div>');
+      H.push('<p>Cada código de serviço virou uma linha em "Receita bruta por atividade", como "Serviços em geral" (32%). Confira a atividade de cada linha.</p>');
+    }
+    if (r.grupos.some(g => /^040[23]/.test(g.codigo))) {
+      H.push('<p class="aviso info"><b>Serviços de saúde:</b> há notas de diagnóstico, clínica ou laboratório. Se a empresa é sociedade empresária e cumpre as normas da Anvisa, troque a atividade dessas linhas para "Serviços hospitalares e de diagnóstico" (IRPJ 8%, CSLL 12%).</p>');
+    }
+    if (r.emitidas && (r.retencoes.irrf || r.conferirRetencoes)) {
+      const rr = r.retencoes;
+      H.push(`<p class="aviso info"><b>Retenções lidas das notas:</b> IRRF ${fmt(rr.irrf)}; CSLL ${fmt(rr.csll)}; PIS ${fmt(rr.pis)}; COFINS ${fmt(rr.cofins)}. Confira com as notas: a Nota Técnica 007/2026 da NFS-e mudou o preenchimento desses campos.</p>`);
+    }
+    relXml.innerHTML = H.join('');
+    relXml.hidden = false;
+  }
+
+  $('#xml-arquivos').addEventListener('change', async ev => {
+    const lista = Array.from(ev.target.files || []);
+    if (!lista.length) return;
+    relXml.hidden = false;
+    relXml.innerHTML = `<p>Lendo ${plural(lista.length, 'arquivo', 'arquivos')}...</p>`;
+    try {
+      const arquivos = await Promise.all(lista.map(async f => ({ nome: f.name, texto: await f.text() })));
+      aplicarImportacao(M.lerNotasXml(arquivos, {
+        cnpj: $('#xml-cnpj').value, ano: Number($('#ano').value), trimestre: Number($('#trimestre').value)
+      }));
+    } catch (err) {
+      relXml.innerHTML = `<p class="aviso erro"><b>Não foi possível ler os arquivos:</b> ${esc(err && err.message ? err.message : err)}</p>`;
+    }
+    ev.target.value = '';
   });
 
   // ---------- Tabela de referência ----------
